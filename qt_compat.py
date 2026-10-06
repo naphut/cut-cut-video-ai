@@ -7,15 +7,16 @@ import sys
 try:
     from PySide6 import QtCore, QtWidgets, QtGui
     from PySide6.QtCore import Qt, Signal, Slot, QThread, QUrl, QMimeData, QTimer, QFileSystemWatcher
-    from PySide6.QtGui import QAction, QKeySequence, QDesktopServices, QShortcut
+    from PySide6.QtGui import QAction, QKeySequence, QDesktopServices, QShortcut, QFontDatabase, QFont
     from PySide6.QtWidgets import (
-        QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+        QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, 
         QPushButton, QFrame, QFileDialog, QTableWidget, QTableWidgetItem, 
-        QHeaderView, QTextEdit, QLineEdit, QAbstractItemView, QProgressBar, 
+        QHeaderView, QTextEdit, QPlainTextEdit, QLineEdit, QAbstractItemView, QProgressBar, 
         QComboBox, QMessageBox, QGroupBox, QSplitter, QDoubleSpinBox, QSlider,
         QCheckBox, QRadioButton, QSpinBox, QTabWidget, QGraphicsView, QGraphicsScene, QScrollArea,
         QInputDialog, QScrollBar, QColorDialog, QMenu, QToolButton, QStyledItemDelegate,
-        QStyleOptionViewItem, QDialog, QDialogButtonBox
+        QStyleOptionViewItem, QDialog, QDialogButtonBox, QSizePolicy, QButtonGroup, QProgressDialog,
+        QStackedWidget, QStackedLayout, QFormLayout
     )
     from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
     from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -29,13 +30,14 @@ except ImportError:
     from PyQt5.QtCore import Qt, pyqtSignal as Signal, pyqtSlot as Slot, QThread, QUrl, QMimeData, QTimer, QFileSystemWatcher
     from PyQt5.QtGui import QKeySequence, QDesktopServices
     from PyQt5.QtWidgets import (
-        QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+        QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, 
         QPushButton, QFrame, QFileDialog, QTableWidget, QTableWidgetItem, 
-        QHeaderView, QTextEdit, QLineEdit, QAbstractItemView, QProgressBar, 
+        QHeaderView, QTextEdit, QPlainTextEdit, QLineEdit, QAbstractItemView, QProgressBar, 
         QComboBox, QMessageBox, QGroupBox, QSplitter, QDoubleSpinBox, QSlider,
         QCheckBox, QRadioButton, QSpinBox, QTabWidget, QGraphicsView, QGraphicsScene, QScrollArea,
         QInputDialog, QScrollBar, QColorDialog, QMenu, QAction, QToolButton, QStyledItemDelegate,
-        QStyleOptionViewItem, QDialog, QDialogButtonBox, QShortcut
+        QStyleOptionViewItem, QDialog, QDialogButtonBox, QShortcut, QSizePolicy, QButtonGroup, QProgressDialog,
+        QStackedWidget, QStackedLayout, QFormLayout
     )
     from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
     from PyQt5.QtMultimediaWidgets import QVideoWidget

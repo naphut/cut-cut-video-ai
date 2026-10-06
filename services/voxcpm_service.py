@@ -1,4 +1,5 @@
 import os
+import re
 import math
 import struct
 import wave
@@ -11,7 +12,10 @@ import sys
 from pathlib import Path
 from utils.logger import logger
 from utils.file_utils import get_temp_path
+from utils.dns_resilience import setup_dns_resilience
 import numpy as np
+
+setup_dns_resilience()
 
 # ==================== EMOTION & STYLE CONFIGURABLE PRESETS ====================
 EMOTION_PRESETS = {
@@ -959,6 +963,11 @@ class VoxCPMService:
         from services.khmer_frontend import preprocess_khmer_tts_text
         text = preprocess_khmer_tts_text(text)
 
+        # Check if text contains any pronounceable letters or characters (handles pure dots '...', dashes, ellipses)
+        if not re.search(r'[\u1780-\u17FF\u4E00-\u9FFFA-Za-z0-9]', text):
+            logger.info(f"🔇 [TTS Silence/Pause] Subtitle has no pronounceable words ('{text}'). Generating clean silence.")
+            return self._generate_silent_wav(output_wav_path, duration=target_duration or 0.5)
+
         preset = VOICE_PRESETS.get(self.voice_name, {})
         is_clone = preset.get("is_clone", False)
         prompt_audio = preset.get("prompt_audio_path")
@@ -1041,15 +1050,8 @@ class VoxCPMService:
 
             return True
 
-        # ==============================
-        # 3. FALLBACK
-        # ==============================
-        if self._synthesize_fallback(text, output_wav_path, target_duration):
-            self._apply_pitch_shift(output_wav_path, pitch_shift, speed_factor, ref_audio_path=prompt_audio, extra_filters=extra_dsp_filters)
-            return True
-
-        return False
-
+        # If Edge-TTS fails after all retries, log and return False so fake audio is never cached
+        logger.error(f"❌ Failed to synthesize Khmer speech for: '{text[:30]}...'")
         return False
 
     def _synthesize_edge_tts(self, text: str, output_wav_path: str, pitch_shift: float = 1.0, speed_factor: float = 1.0, target_duration: float = None) -> bool:
@@ -1083,26 +1085,52 @@ class VoxCPMService:
                 shutil.copy(self._voice_cache[cache_key], output_wav_path)
                 return True
 
-            async def run_tts():
-                communicate = edge_tts.Communicate(text, edge_voice, rate=rate_str, pitch=pitch_str, volume="+0%")
-                temp_mp3 = output_wav_path.replace(".wav", "_raw.mp3")
-                await communicate.save(temp_mp3)
-                
-                from utils.ffmpeg import extract_audio
-                extract_audio(temp_mp3, output_wav_path)
-                if os.path.exists(temp_mp3):
-                    os.remove(temp_mp3)
-                    
-                if os.path.exists(output_wav_path):
-                    # Save a copy in cache
-                    raw_cache_path = get_temp_path(f"raw_tts_cache_{abs(hash(cache_key))}.wav")
-                    shutil.copy(output_wav_path, raw_cache_path)
-                    self._voice_cache[cache_key] = raw_cache_path
+            async def run_tts_with_retry():
+                candidates = [edge_voice]
+                # Fallback to alternative Khmer neural voice if primary voice has issue
+                alt_voice = "km-KH-PisethNeural" if "Sreymom" in edge_voice else "km-KH-SreymomNeural"
+                candidates.append(alt_voice)
 
-            asyncio.run(run_tts())
-            return os.path.exists(output_wav_path) and os.path.getsize(output_wav_path) > 0
+                temp_mp3 = output_wav_path.replace(".wav", "_raw.mp3")
+                from utils.ffmpeg import extract_audio
+
+                for v in candidates:
+                    for attempt in range(5):
+                        try:
+                            communicate = edge_tts.Communicate(
+                                text, v, rate=rate_str, pitch=pitch_str, volume="+0%",
+                                connect_timeout=15, receive_timeout=60
+                            )
+                            await communicate.save(temp_mp3)
+                            if os.path.exists(temp_mp3) and os.path.getsize(temp_mp3) > 100:
+                                extract_audio(temp_mp3, output_wav_path)
+                                if os.path.exists(temp_mp3):
+                                    os.remove(temp_mp3)
+                                if os.path.exists(output_wav_path) and os.path.getsize(output_wav_path) > 1000:
+                                    raw_cache_path = get_temp_path(f"raw_tts_cache_{abs(hash(cache_key))}.wav")
+                                    shutil.copy(output_wav_path, raw_cache_path)
+                                    self._voice_cache[cache_key] = raw_cache_path
+                                    return True
+                        except Exception as e_att:
+                            if os.path.exists(temp_mp3):
+                                try:
+                                    os.remove(temp_mp3)
+                                except Exception:
+                                    pass
+                            err_str = str(e_att)
+                            is_dns_net = any(k in err_str for k in ("nodename", "servname", "Cannot connect", "ClientConnectorError", "TimeoutError", "gaierror"))
+                            backoff = min(6.0, (attempt + 1) * 1.2) if is_dns_net else (attempt + 1) * 0.5
+                            if is_dns_net:
+                                logger.warning(f"🌐 [Network/DNS Dropout] Edge-TTS attempt {attempt+1}/5 with {v} failed: {e_att}. Auto-reconnecting in {backoff:.1f}s...")
+                            else:
+                                logger.warning(f"Edge-TTS attempt {attempt+1}/5 with {v} failed ({e_att}), retrying in {backoff:.1f}s...")
+                            await asyncio.sleep(backoff)
+                return False
+
+            asyncio.run(run_tts_with_retry())
+            return os.path.exists(output_wav_path) and os.path.getsize(output_wav_path) > 1000
         except Exception as e:
-            logger.debug(f"Edge-TTS synthesis error: {e}")
+            logger.error(f"Edge-TTS synthesis error: {e}")
             return False
 
     def _analyze_reference_spectral_eq(self, ref_wav_path: str) -> str:
@@ -1186,8 +1214,9 @@ class VoxCPMService:
                     filters.append(ef)
 
         filters.extend([
-            "acompressor=threshold=-16dB:ratio=2.5:attack=15:release=120",
-            "loudnorm=I=-16:TP=-1.5:LRA=10"
+            "acompressor=threshold=-14dB:ratio=2.5:attack=15:release=120",
+            "loudnorm=I=-14:TP=-1.0:LRA=7",
+            "volume=1.2"
         ])
 
         if apply_eq and ref_audio_path and os.path.exists(ref_audio_path):

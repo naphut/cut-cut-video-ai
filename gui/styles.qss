@@ -319,15 +319,16 @@ QTableWidget {
     background-color: #090d18;
     border: 1px solid #192238;
     border-radius: 8px;
-    gridline-color: #131a2c;
+    gridline-color: transparent;
     color: #e2e8f0;
     font-size: 12px;
-    selection-background-color: #162038;
+    selection-background-color: #192747;
     selection-color: #38bdf8;
+    outline: none;
 }
 
 QTableWidget::item {
-    padding: 6px 8px;
+    padding: 4px 6px;
     border-bottom: 1px solid #111728;
 }
 
@@ -335,24 +336,71 @@ QTableWidget::item:hover {
     background-color: #12192d;
 }
 
+QHeaderView {
+    background-color: #090d18;
+    border: none;
+}
+
 QHeaderView::section {
     background-color: #0f1526;
     color: #94a3b8;
-    padding: 6px 10px;
+    padding: 7px 10px;
     border: none;
-    border-bottom: 1px solid #1e2942;
+    border-bottom: 2px solid #1e2942;
     font-weight: 700;
-    font-size: 11px;
+    font-size: 10px;
     letter-spacing: 0.5px;
 }
 
-/* ==================== SPLITTER & PROGRESS BAR ==================== */
-QSplitter::handle {
-    background-color: #151d32;
+QTableCornerButton::section {
+    background-color: #0f1526;
+    border: none;
 }
 
-QSplitter::handle:hover {
+/* ==================== VIDEO PREVIEW FRAME ==================== */
+QFrame#videoPreviewFrame {
+    background-color: #050811;
+    border: 1px solid #1e2942;
+    border-radius: 8px;
+}
+
+/* ==================== SPLITTER & PROGRESS BAR ==================== */
+QSplitter::handle:horizontal {
+    background-color: #121929;
+    border-left: 1px solid #1e2942;
+    border-right: 1px solid #0f172a;
+    width: 8px;
+    margin: 0px 1px;
+    border-radius: 4px;
+}
+
+QSplitter::handle:horizontal:hover {
     background-color: #38bdf8;
+    border-left: 1px solid #7dd3fc;
+    border-right: 1px solid #0284c7;
+}
+
+QSplitter::handle:horizontal:pressed {
+    background-color: #0284c7;
+}
+
+QSplitter::handle:vertical {
+    background-color: #121929;
+    border-top: 1px solid #1e2942;
+    border-bottom: 1px solid #0f172a;
+    height: 8px;
+    margin: 1px 0px;
+    border-radius: 4px;
+}
+
+QSplitter::handle:vertical:hover {
+    background-color: #38bdf8;
+    border-top: 1px solid #7dd3fc;
+    border-bottom: 1px solid #0284c7;
+}
+
+QSplitter::handle:vertical:pressed {
+    background-color: #0284c7;
 }
 
 QProgressBar {
@@ -401,7 +449,7 @@ QTextEdit#logConsole {
     background-color: #060912;
     border: 1px solid #161e32;
     border-radius: 8px;
-    font-family: 'Menlo', 'JetBrains Mono', monospace;
+    font-family: 'Menlo', 'Courier New';
     font-size: 11px;
     color: #38bdf8;
     padding: 6px;

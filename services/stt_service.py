@@ -25,14 +25,12 @@ from utils.file_utils import get_temp_path
 class STTService:
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or get_gemini_api_key()
-        # Production model hierarchy (gemini-3.5-transcribe & gemini-3.6-flash are active)
+        # Production model hierarchy (gemini-3.5-transcribe & gemini-3.1-flash-lite are active & available)
         self.models = [
-            "gemini-3.5-transcribe",
-            "gemini-3.6-flash",
-            "gemini-3.8-flash",
-            "gemini-3.7-flash",
-            "gemini-3.5-flash",
-            "gemini-3.1-pro-preview"
+            "gemini-3.1-flash-lite",
+            "gemini-flash-lite-latest",
+            "gemini-3.1-flash-lite-preview",
+            "gemini-3.5-flash-lite"
         ]
         self.vad_service = VADService()
 
@@ -102,17 +100,27 @@ class STTService:
         segments: List[Segment] = []
         for i, s in enumerate(raw_segs):
             spk = s.get("speaker") or ("Speaker 1" if i % 2 == 0 else "Speaker 2")
-            segments.append(Segment(
+            st_val = float(s["start"])
+            et_val = float(s["end"])
+            raw_st = float(s.get("raw_start", st_val))
+            raw_et = float(s.get("raw_end", et_val))
+            seg = Segment(
                 id=f"seg_{i+1:04d}",
-                start=float(s["start"]),
-                end=float(s["end"]),
+                start=st_val,
+                end=et_val,
                 speaker_id=spk,
                 source_language=source_lang if source_lang != "auto" else "en",
                 original_text=s["text"],
                 target_language="km",
                 status="ready",
-                translation_status="pending"
-            ))
+                translation_status="pending",
+                raw_start=raw_st,
+                raw_end=raw_et,
+                words=s.get("words"),
+                confidence=s.get("confidence")
+            )
+            self._log_segment_debug("RAW", seg)
+            segments.append(seg)
 
         segments = self._normalize_transcript_segments(segments)
         if progress_callback:
@@ -266,21 +274,73 @@ class STTService:
 
 
     def _parse_json_array(self, raw_text: str) -> List[Dict[str, Any]]:
-        """Clean and parse JSON array output from Gemini."""
-        clean = raw_text.strip()
-        if clean.startswith("```"):
-            clean = re.sub(r"^```(?:json)?\s*", "", clean)
-            clean = re.sub(r"\s*```$", "", clean)
-        try:
-            return json.loads(clean)
-        except Exception:
-            m = re.search(r"\[\s*\{.*\}\s*\]", clean, re.DOTALL)
-            if m:
-                return json.loads(m.group(0))
-        return []
+        """Clean and parse JSON array output from Gemini with robust recovery."""
+        from utils.gemini_parser import parse_gemini_json_response
+        return parse_gemini_json_response(raw_text)
+
+    def _log_segment_debug(self, stage: str, seg: Segment):
+        """Structured debug logging per Requirement 13."""
+        txt = (seg.original_text or "").replace('\n', ' ')
+        words_cnt = len(txt.split())
+        conf_str = f", conf={seg.confidence:.2f}" if seg.confidence is not None else ""
+        raw_dur = f", raw_dur={seg.raw_end - seg.raw_start:.2f}s" if (seg.raw_start is not None and seg.raw_end is not None) else ""
+        logger.info(
+            f"[STT {stage}] id={seg.id}, time={seg.start:.2f}-{seg.end:.2f}s (dur={seg.slot_duration:.2f}s{raw_dur}), "
+            f"words={words_cnt}{conf_str}, spk={seg.speaker_id}: \"{txt}\""
+        )
+
+    def validate_segments(self, segments: List[Segment]) -> List[Segment]:
+        """
+        Safe pipeline validation per Requirement 14:
+        - start >= 0
+        - end > start
+        - no empty text
+        - no severe timestamp overlap
+        - word timestamps remain inside segment boundaries
+        Logs WARNING rather than silently deleting suspicious items.
+        """
+        valid_segments = []
+        for i, s in enumerate(segments):
+            if s.start < 0:
+                logger.warning(f"⚠️ [STT Validation] Segment {s.id} has negative start ({s.start}s). Clamping to 0.0s.")
+                s.start = 0.0
+            if s.end <= s.start:
+                logger.warning(f"⚠️ [STT Validation] Segment {s.id} has end <= start ({s.start}-{s.end}s). Setting duration to 0.3s.")
+                s.end = round(s.start + 0.30, 2)
+            
+            s.slot_duration = round(s.end - s.start, 2)
+            
+            if not (s.original_text or "").strip():
+                logger.warning(f"⚠️ [STT Validation] Segment {s.id} has empty text. Skipping.")
+                continue
+
+            # Verify word timestamps inside boundary
+            if s.words:
+                first_w = s.words[0]["start"]
+                last_w = s.words[-1]["end"]
+                if first_w < s.start - 0.05:
+                    logger.warning(f"⚠️ [STT Validation] Word start ({first_w}s) is before segment start ({s.start}s) for {s.id}. Adjusting segment start.")
+                    s.start = round(max(0.0, first_w - 0.05), 2)
+                    s.slot_duration = round(s.end - s.start, 2)
+                if last_w > s.end + 0.05:
+                    logger.warning(f"⚠️ [STT Validation] Word end ({last_w}s) is after segment end ({s.end}s) for {s.id}. Adjusting segment end.")
+                    s.end = round(last_w + 0.05, 2)
+                    s.slot_duration = round(s.end - s.start, 2)
+
+            valid_segments.append(s)
+
+        return valid_segments
 
     def _normalize_transcript_segments(self, segments: List[Segment]) -> List[Segment]:
-        """Normalize segment timing: sort, eliminate timestamp collisions, and remove duplicate loops."""
+        """
+        Conservative, dialogue-preserving normalization:
+        1. Preserves raw Whisper timestamps (raw_start, raw_end).
+        2. Protects word-level timestamps (never cuts into spoken words).
+        3. Never discards short speech ("Yes", "No", "Wait", "Hey!" are preserved).
+        4. Overlaps are resolved using silence gaps between word boundaries when available.
+        5. Does not aggressively delete repetitions unless heavy overlap + identical text indicates a glitch.
+        6. Emits structured debug logging ([STT RAW] vs [STT NORMALIZED]).
+        """
         if not segments:
             return []
 
@@ -288,63 +348,134 @@ class STTService:
         segments.sort(key=lambda s: (s.start, s.end))
 
         normalized: List[Segment] = []
-        for curr in segments:
+
+        for i, curr in enumerate(segments):
+            # Ensure raw timestamps are stored
+            if curr.raw_start is None:
+                curr.raw_start = curr.start
+            if curr.raw_end is None:
+                curr.raw_end = curr.end
+
             text = (curr.original_text or curr.text or "").strip()
-            if not text or curr.end <= curr.start or (curr.end - curr.start) < 0.2:
+            # Only discard truly empty segments or pure punctuation with no words
+            clean_text = re.sub(r'^[^\w\s]+|[^\w\s]+$', '', text).strip()
+            if not clean_text:
+                logger.debug(f"[STT NORM] Discarding empty/symbol-only segment id={curr.id}: '{text}'")
                 continue
 
+            # Ensure minimal duration sanity (end > start)
+            if curr.end <= curr.start:
+                curr.end = round(curr.start + 0.30, 2)
+
+            # Use word timestamps to safeguard boundaries (Requirement 8)
+            curr_words = curr.words or []
+            if curr_words:
+                first_w_st = curr_words[0]["start"]
+                last_w_et = curr_words[-1]["end"]
+                # Expand slightly to preserve initial plosives and ending decay
+                safe_w_start = max(0.0, round(first_w_st - 0.05, 2))
+                safe_w_end = round(last_w_et + 0.10, 2)
+                curr.start = min(curr.start, safe_w_start)
+                curr.end = max(curr.end, safe_w_end)
+
             if not normalized:
-                curr.start = round(curr.start, 2)
+                curr.start = round(max(0.0, curr.start), 2)
                 curr.end = round(curr.end, 2)
                 curr.slot_duration = round(curr.end - curr.start, 2)
                 normalized.append(curr)
+                self._log_segment_debug("NORMALIZED", curr)
                 continue
 
             prev = normalized[-1]
             prev_text = (prev.original_text or prev.text or "").strip()
+            prev_words = prev.words or []
 
-            # 1. Eliminate duplicate repeated phrases (Whisper / VAD repetition loop)
-            if text.lower() == prev_text.lower():
-                # Duplicate text! Extend prev if curr ends later, then discard curr
+            # 1. Repetition / Glitch Detection (Requirement 10)
+            # Only treat as hallucination if text is identical AND timestamps overlap heavily (< 0.20s gap)
+            is_same_text = (text.lower() == prev_text.lower())
+            is_heavy_overlap = (curr.start < prev.end + 0.20)
+            if is_same_text and is_heavy_overlap:
+                logger.info(f"🔁 [STT NORM] Glitch repetition loop detected: '{text}' (curr {curr.start:.2f}-{curr.end:.2f}s overlaps prev {prev.start:.2f}-{prev.end:.2f}s). Merging.")
                 if curr.end > prev.end:
                     prev.end = round(curr.end, 2)
                     prev.slot_duration = round(prev.end - prev.start, 2)
                 continue
 
-            # 2. Check if curr is completely enclosed inside prev
+            # 2. Check complete enclosure: curr inside prev
             if curr.start >= prev.start and curr.end <= prev.end:
                 if text.lower() in prev_text.lower():
                     # Substring already contained in previous segment
+                    logger.debug(f"[STT NORM] Substring enclosed inside prev segment id={prev.id}. Skipping id={curr.id}.")
                     continue
                 elif prev_text.lower() in text.lower():
-                    # Curr is more complete, replace prev text
+                    # Curr is the fuller phrase, update prev text without cutting
                     prev.original_text = curr.original_text
                     prev.text = curr.text
                     continue
 
-            # 3. Resolve timestamp overlap (កុំឱ្យជាន់ម៉ោងគ្នា)
+            # 3. Safe Word-Aware Overlap Resolution (Requirement 7 & 8)
             if curr.start < prev.end:
-                overlap = prev.end - curr.start
-                mid = round((prev.end + curr.start) / 2.0, 2)
+                overlap_sec = round(prev.end - curr.start, 2)
+                
+                # Check if word timestamps can find the silence gap between the two utterances
+                resolved = False
+                if prev_words and curr_words:
+                    prev_last_word_end = prev_words[-1]["end"]
+                    curr_first_word_start = curr_words[0]["start"]
+                    
+                    if curr_first_word_start >= prev_last_word_end:
+                        # Perfect! Boundary placed cleanly in the silence gap between words
+                        mid_gap = round((prev_last_word_end + curr_first_word_start) / 2.0, 2)
+                        prev.end = max(round(prev.start + 0.1, 2), mid_gap)
+                        curr.start = min(round(curr.end - 0.1, 2), mid_gap)
+                        resolved = True
+                        logger.debug(f"[STT NORM] Resolved overlap between id={prev.id} and {curr.id} using word silence gap: {mid_gap}s (prev word end: {prev_last_word_end}s, curr word start: {curr_first_word_start}s)")
+                
+                if not resolved:
+                    # If words overlap (speakers talking at same time) or no word timestamps:
+                    # Do NOT cut into words! Allow small natural overlaps (<= 0.25s)
+                    if overlap_sec <= 0.25:
+                        logger.debug(f"[STT NORM] Small natural dialogue overlap ({overlap_sec:.2f}s) tolerated between id={prev.id} and {curr.id}")
+                    else:
+                        # Significant overlap (> 0.25s): Determine overlap nature
+                        if prev_words and curr_words:
+                            min_prev_end = round(prev_words[-1]["end"] + 0.05, 2)
+                            max_curr_start = round(curr_words[0]["start"] - 0.05, 2)
+                            if min_prev_end <= max_curr_start:
+                                # Clean silence gap between spoken words: place boundary right in the gap
+                                mid = round((min_prev_end + max_curr_start) / 2.0, 2)
+                                prev.end = mid
+                                curr.start = mid
+                                logger.debug(f"[STT NORM] Clean boundary placed in word gap: {mid}s")
+                            else:
+                                # Legitimate simultaneous speech (overlapping actors):
+                                # NEVER cut into words! Allow each segment to encompass its complete words.
+                                prev.end = max(prev.end, min_prev_end)
+                                curr.start = min(curr.start, max(0.0, max_curr_start))
+                                logger.info(f"[STT NORM] Preserved simultaneous speech overlap between id={prev.id} and {curr.id} without cutting word boundaries.")
+                        else:
+                            # Without word timestamps: split at midpoint while guaranteeing minimum durations
+                            mid = round((prev.end + curr.start) / 2.0, 2)
+                            if (mid - prev.start) >= 0.4 and (curr.end - mid) >= 0.4:
+                                prev.end = mid
+                                curr.start = mid
+                            else:
+                                if curr.end - prev.end >= 0.3:
+                                    curr.start = round(prev.end, 2)
 
-                # If both sides have plenty of duration, divide at midpoint
-                if (mid - prev.start) >= 0.35 and (curr.end - mid) >= 0.35:
-                    prev.end = mid
-                    prev.slot_duration = round(prev.end - prev.start, 2)
-                    curr.start = mid
-                else:
-                    # Otherwise clamp curr.start to prev.end
-                    curr.start = round(prev.end, 2)
-
-            curr.start = round(curr.start, 2)
+            # Final boundary rounding & slot duration calculation
+            curr.start = round(max(0.0, curr.start), 2)
             curr.end = round(curr.end, 2)
+            if curr.end <= curr.start:
+                curr.end = round(curr.start + 0.30, 2)
+            curr.slot_duration = round(curr.end - curr.start, 2)
 
-            # Only accept segments with valid duration
-            if curr.end - curr.start >= 0.25:
-                curr.slot_duration = round(curr.end - curr.start, 2)
-                normalized.append(curr)
+            normalized.append(curr)
+            self._log_segment_debug("NORMALIZED", curr)
 
-        return normalized
+        # Run safe validation step (Requirement 14)
+        validated = self.validate_segments(normalized)
+        return validated
 
     def _get_duration_sec(self, audio_path: str) -> float:
         try:

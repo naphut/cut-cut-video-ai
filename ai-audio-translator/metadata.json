@@ -1,6 +1,0 @@
-{
-  "name": "AI Audio Translator",
-  "description": "កម្មវិធីបកប្រែសំឡេង MP3 ទៅជាអត្ថបទខ្មែរ និង Subtitles ដោយប្រើ AI ជំនាន់ថ្មី",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

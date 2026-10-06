@@ -12,10 +12,10 @@ from utils.logger import logger
 class VADService:
     def __init__(
         self,
-        min_silence_len_ms: int = 500,
-        silence_thresh_offset_db: float = -16.0,
-        min_speech_len_ms: int = 300,
-        speech_padding_ms: int = 250
+        min_silence_len_ms: int = 700,
+        silence_thresh_offset_db: float = -18.0,
+        min_speech_len_ms: int = 150,
+        speech_padding_ms: int = 450
     ):
         self.min_silence_len_ms = min_silence_len_ms
         self.silence_thresh_offset_db = silence_thresh_offset_db

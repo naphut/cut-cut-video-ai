@@ -65,8 +65,9 @@ class SRTTranslator:
                 end_sec = self._time_to_seconds(end_str)
                 
                 raw_text = " ".join(lines[2:]).strip()
-                tag_pattern = r'^\s*(?:\[|\()?\s*(ក្មេង(?:ប្រុស|ស្រី)?|កូន|child(?:ren)?|kid|boy|girl|ស្រី|female|woman|lady|ប្រុស|male|man|guy|មនុស្សចាស់|ចាស់|elder|លោកតា|លោកយាយ|speaker\s*\d+)\s*(?:\]|\))?\s*[:：\-–—]?\s*'
-                m = re.match(tag_pattern, raw_text, flags=re.IGNORECASE)
+                m_bracket = re.match(r'^\s*(?:\[|\()([^\]\)]+)(?:\]|\))\s*[:：\-–—]?\s*', raw_text)
+                m_colon = re.match(r'^\s*(ក្មេង(?:ប្រុស|ស្រី)?|កូន|child(?:ren)?|kid|boy|girl|ចាស់(?:ប្រុស|ស្រី)?|មនុស្សចាស់|elder(?:ly)?(?:\s*(?:male|female|man|woman))?|លោកតា|លោកយាយ|យាយ|តា|ស្រី|female|woman|lady|ប្រុស|male|man|guy|speaker\s*\d+)\s*[:：]\s*', raw_text, flags=re.IGNORECASE)
+                m = m_bracket or m_colon
                 spk = ""
                 clean_text = raw_text
                 if m:
@@ -74,14 +75,19 @@ class SRTTranslator:
                     tw = m.group(1).lower()
                     if any(w in tw for w in ['ក្មេង', 'កូន', 'child', 'kid', 'boy', 'girl']):
                         spk = "🧒 ក្មេង"
+                    elif any(w in tw for w in ['ចាស់ស្រី', 'លោកយាយ', 'យាយ']) or 'elderly female' in tw:
+                        spk = "👵 ចាស់ស្រី"
+                    elif any(w in tw for w in ['ចាស់ប្រុស', 'លោកតា', 'តា']) or 'elderly male' in tw:
+                        spk = "👴 ចាស់ប្រុស"
+                    elif any(w in tw for w in ['ចាស់', 'elder', 'មនុស្សចាស់']):
+                        spk = "👵👴 មនុស្សចាស់"
                     elif any(w in tw for w in ['ស្រី', 'female', 'woman', 'lady']):
                         spk = "👩 ស្រី"
-                    elif any(w in tw for w in ['ចាស់', 'elder', 'លោកតា', 'លោកយាយ']):
-                        spk = "👵👴 មនុស្សចាស់"
                     elif any(w in tw for w in ['ប្រុស', 'male', 'man']):
                         spk = "👨 ប្រុស"
-                if clean_text.startswith('[') and ']' in clean_text[:15]:
-                    clean_text = re.sub(r'^\s*\[[^\]]+\]\s*', '', clean_text).strip()
+
+                from services.khmer_frontend import strip_speaker_tags
+                clean_text = strip_speaker_tags(clean_text)
 
                 segments.append(SubtitleSegment(
                     index=index,

@@ -6,33 +6,33 @@ import hashlib
 from dataclasses import dataclass, field, asdict
 from typing import Optional, Dict, Any, List
 
-# Standard 12 Personas
+# Standard 12 Personas (Clean & Professional)
 PERSONA_CHOICES = [
-    "👨 Male Adult",
-    "👩 Female Adult",
-    "👦 Boy / Child",
-    "👧 Girl / Child",
-    "👴 Elderly Male",
-    "👵 Elderly Female",
-    "👨🦱 Young Male",
-    "👩🦰 Young Female",
-    "🎭 Narrator",
-    "🤖 AI / Robot",
-    "📢 Announcer",
-    "👥 Crowd / Group"
+    "Male Adult",
+    "Female Adult",
+    "Boy / Child",
+    "Girl / Child",
+    "Elderly Male",
+    "Elderly Female",
+    "Young Male",
+    "Young Female",
+    "Narrator",
+    "AI / Robot",
+    "Announcer",
+    "Crowd / Group"
 ]
 
-# Standard 9 Emotions
+# Standard 9 Emotions (Clean & Professional)
 EMOTION_CHOICES = [
-    "😐 Neutral",
-    "😊 Happy",
-    "😢 Sad",
-    "😡 Angry",
-    "😨 Fear",
-    "😱 Excited",
-    "😍 Romantic",
-    "😭 Crying",
-    "😮 Surprised"
+    "Neutral",
+    "Happy",
+    "Sad",
+    "Angry",
+    "Fear",
+    "Excited",
+    "Romantic",
+    "Crying",
+    "Surprised"
 ]
 
 # Standard 8 Speaking Styles
@@ -47,8 +47,41 @@ STYLE_CHOICES = [
     "Dramatic"
 ]
 
-# Default Persona to Voice Mapping
+def normalize_persona(p: str) -> str:
+    """Normalize persona string by removing legacy emojis if present."""
+    if not p:
+        return "Male Adult"
+    s = str(p).strip()
+    for choice in PERSONA_CHOICES:
+        if choice.lower() == s.lower() or choice.lower() in s.lower():
+            return choice
+    return s
+
+def normalize_emotion(e: str) -> str:
+    """Normalize emotion string by removing legacy emojis if present."""
+    if not e:
+        return "Neutral"
+    s = str(e).strip()
+    for choice in EMOTION_CHOICES:
+        if choice.lower() == s.lower() or choice.lower() in s.lower():
+            return choice
+    return s
+
+# Default Persona to Voice Mapping (Supports both clean and legacy keys)
 PERSONA_DEFAULT_VOICE = {
+    "Male Adult": "Khmer Male - Piseth",
+    "Female Adult": "Khmer Female - Sreymom",
+    "Boy / Child": "Khmer Child - Boy (Vannak)",
+    "Girl / Child": "Khmer Child - Girl (Sreyka)",
+    "Elderly Male": "Khmer Elder - Male (Grandfather)",
+    "Elderly Female": "Khmer Elder - Female (Grandmother)",
+    "Young Male": "Khmer Male - Piseth",
+    "Young Female": "Khmer Female - Sreymom",
+    "Narrator": "Khmer Male - Piseth",
+    "AI / Robot": "Khmer Male - Piseth",
+    "Announcer": "Khmer Male - Piseth",
+    "Crowd / Group": "Khmer Male - Piseth",
+    # Legacy emoji mappings for backwards compatibility
     "👨 Male Adult": "Khmer Male - Piseth",
     "👩 Female Adult": "Khmer Female - Sreymom",
     "👦 Boy / Child": "Khmer Child - Boy (Vannak)",
@@ -115,8 +148,10 @@ class Segment:
     start: float
     end: float
     speaker_id: str = "speaker_01"
-    persona: str = "👨 Male Adult"
-    emotion: str = "😐 Neutral"
+    speaker_tag: Optional[str] = None
+    speaker_role: Optional[str] = None
+    persona: str = "Male Adult"
+    emotion: str = "Neutral"
     speaking_style: str = "Normal"
     source_language: str = "auto"
     original_text: str = ""
@@ -132,8 +167,16 @@ class Segment:
     translation_status: str = "pending"      # pending | translated | approved
     tts_status: str = "pending"              # pending | generated | synced
     error: Optional[str] = None
+    raw_start: Optional[float] = None
+    raw_end: Optional[float] = None
+    words: Optional[List[Dict[str, Any]]] = None
+    confidence: Optional[float] = None
 
     def __post_init__(self):
+        if self.raw_start is None:
+            self.raw_start = self.start
+        if self.raw_end is None:
+            self.raw_end = self.end
         if self.slot_duration <= 0.0:
             self.slot_duration = max(0.1, round(self.end - self.start, 2))
         if not self.translated_text and hasattr(self, 'khmer_text') and getattr(self, 'khmer_text', None):
@@ -265,7 +308,11 @@ class Segment:
             status=data.get("status", "ready"),
             translation_status="translated" if trans_text else "pending",
             tts_status="generated" if data.get("tts_audio") else "pending",
-            error=data.get("error")
+            error=data.get("error"),
+            raw_start=float(data.get("raw_start")) if data.get("raw_start") is not None else st,
+            raw_end=float(data.get("raw_end")) if data.get("raw_end") is not None else et,
+            words=data.get("words"),
+            confidence=float(data.get("confidence")) if data.get("confidence") is not None else None
         )
 
 

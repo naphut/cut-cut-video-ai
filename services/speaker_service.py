@@ -20,24 +20,7 @@ class SpeakerService:
             return []
 
         detector = SpeakerDetector(audio_path)
-        updated_segments = []
-
-        for seg in subtitle_segments:
-            start_s = seg.get("start", 0.0)
-            end_s = seg.get("end", 3.0)
-            
-            f0 = detector.analyze_audio_segment_pitch(start_s, end_s)
-            
-            # Simple heuristic pitch clustering: F0 > 170Hz -> Female speaker, F0 <= 170Hz -> Male speaker
-            if f0 > 0:
-                speaker_id = "Speaker 1" if f0 <= 170.0 else "Speaker 2"
-            else:
-                speaker_id = seg.get("speaker", "Speaker 1")
-
-            seg_copy = dict(seg)
-            seg_copy["speaker"] = speaker_id
-            seg_copy["pitch_f0"] = f0
-            updated_segments.append(seg_copy)
-
+        updated_segments = detector.diarize_and_profile_segments(subtitle_segments)
         logger.info(f"👥 [SpeakerService] Assigned speaker labels across {len(updated_segments)} subtitle segments.")
         return updated_segments
+

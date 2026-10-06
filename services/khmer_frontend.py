@@ -197,13 +197,96 @@ def chunk_khmer_text(text: str, max_chars: int = 110) -> List[str]:
     return [c for c in chunks if c] or [text]
 
 
-def preprocess_khmer_tts_text(text: str) -> str:
+def strip_speaker_tags(text: str) -> str:
     """
-    Unified entry point for preparing raw Khmer text for high-fidelity TTS generation.
-    Expands all numbers, currencies, percentages, and normalizes Unicode.
+    Universally strips leading speaker/character tags from text so that neither
+    TTS audio engines nor subtitle displays contain brackets or speaker tags.
+    Handles:
+      [ក្មេង], [ក្មេងប្រុស], [ក្មេងស្រី], [កូន], [child], [kid], [boy], [girl],
+      [ចាស់], [ចាស់ប្រុស], [ចាស់ស្រី], [មនុស្សចាស់], [elder], [elderly male/female],
+      [លោកតា], [លោកយាយ], [យាយ], [តា],
+      [ស្រី], [female], [woman], [lady],
+      [ប្រុស], [male], [man], [guy],
+      [Speaker 1], [Speaker 01], (ក្មេង), etc.
+    CRITICAL: Never strips unbracketed words unless followed by a colon (e.g. 'កូន: ...'),
+    so that natural spoken dialogue like 'កូន...', 'តា...', or 'ស្រី...' is 100% preserved.
     """
     if not text:
         return ""
-    norm = normalize(text)
+    raw = str(text).strip()
+
+    # 1. Strip bracketed or parenthesized tags in a loop: [ក្មេង], (ស្រី), [Speaker 1], etc.
+    while True:
+        m = re.match(r'^\s*(?:\[[^\]\n]+\]|\([^\)\n]+\)|<[^>\n]+>)\s*[:：\-–—]?\s*', raw)
+        if m and m.end() > 0:
+            raw = raw[m.end():].strip()
+        else:
+            break
+
+    # 2. Strip explicit speaker labels with required colon: e.g. "ក្មេង:", "ប្រុស：", "Speaker 1:"
+    raw = re.sub(
+        r'^\s*(?:ក្មេង(?:ប្រុស|ស្រី)?|កូន|child(?:ren)?|kid|boy|girl|ចាស់(?:ប្រុស|ស្រី)?|'
+        r'មនុស្សចាស់|elder(?:ly)?(?:\s*(?:male|female|man|woman))?|លោកតា|លោកយាយ|យាយ|តា|'
+        r'ស្រី|female|woman|lady|ប្រុស|male|man|guy|speaker\s*\d+)\s*[:：]\s*',
+        '',
+        raw,
+        flags=re.IGNORECASE
+    ).strip()
+
+    # 3. Clean any dangling punctuation or orphaned closing brackets at start
+    raw = re.sub(r'^[\]\)\>\:\：\-\–—\s]+', '', raw).strip()
+    return raw or str(text).strip()
+
+
+def preprocess_khmer_tts_text(text: str) -> str:
+    """
+    Unified entry point for preparing raw Khmer text for high-fidelity TTS generation.
+    Strips speaker tags, expands all numbers, currencies, percentages, and normalizes Unicode.
+    """
+    if not text:
+        return ""
+    cleaned = strip_speaker_tags(text)
+    norm = normalize(cleaned)
     expanded = normalize_numbers(norm)
     return expanded
+
+
+def wrap_khmer_subtitle_lines(text: str, font_metrics, max_width: int) -> List[str]:
+    """
+    Intelligently breaks a Khmer or multilingual subtitle string into visual lines that
+    strictly do not exceed `max_width`. Respects Khmer syllables, punctuation, and spaces.
+    Prevents subtitle clipping on the edges of the video.
+    """
+    if not text:
+        return []
+    raw_words = text.split()
+    tokens = []
+    for w in raw_words:
+        if font_metrics.horizontalAdvance(w) > max_width:
+            tokens.extend(_split_syllables(w))
+        else:
+            tokens.append(w)
+    if not tokens:
+        tokens = _split_syllables(text)
+
+    lines: List[str] = []
+    curr = ""
+    for tok in tokens:
+        if not curr:
+            curr = tok
+            continue
+        is_khmer_cur = bool(curr and '\u1780' <= curr[-1] <= '\u17ff')
+        is_khmer_tok = bool(tok and '\u1780' <= tok[0] <= '\u17ff')
+        if is_khmer_cur and is_khmer_tok and len(tok) <= 4:
+            test = curr + tok
+        else:
+            test = f"{curr} {tok}".strip()
+        if font_metrics.horizontalAdvance(test) <= max_width:
+            curr = test
+        else:
+            lines.append(curr)
+            curr = tok
+    if curr:
+        lines.append(curr)
+    return lines
+
