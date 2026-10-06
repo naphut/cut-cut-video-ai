@@ -8,6 +8,13 @@ import sys
 import shutil
 import subprocess
 
+# Ensure UTF-8 output even on Windows CP1252 consoles
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def check_pyinstaller():
@@ -15,17 +22,17 @@ def check_pyinstaller():
         import PyInstaller
         return True
     except ImportError:
-        print("⚠️ PyInstaller not installed. Installing PyInstaller...")
+        print("[!] PyInstaller not installed. Installing PyInstaller...")
         res = subprocess.run([sys.executable, "-m", "pip", "install", "pyinstaller"], check=False)
         return res.returncode == 0
 
 def build():
     print("==============================================================")
-    print("🚀 Starting Production Build for Video AI Studio (Windows)")
+    print("[*] Starting Production Build for Video AI Studio (Windows)")
     print("==============================================================")
 
     if not check_pyinstaller():
-        print("❌ Failed to find or install PyInstaller.")
+        print("[X] Failed to find or install PyInstaller.")
         sys.exit(1)
 
     icon_path = os.path.join(BASE_DIR, "assets", "app_icon.ico")
@@ -108,21 +115,21 @@ def build():
     # Entry point
     cmd.append(os.path.join(BASE_DIR, "main.py"))
 
-    print("\n📦 Running compiler command:")
+    print("\n[+] Running compiler command:")
     print(" ".join(cmd))
-    print("\n⏳ Compiling... Please wait...\n")
+    print("\n[*] Compiling... Please wait...\n")
 
     res = subprocess.run(cmd, cwd=BASE_DIR)
     if res.returncode == 0:
         dist_dir = os.path.join(BASE_DIR, "dist", "Video_AI")
         print("\n==============================================================")
-        print("✅ Compilation Successful!")
-        print(f"📁 Standalone Windows App built at: {dist_dir}")
-        print("🔒 All Python code is compiled into binaries (Zero .py source code exposed).")
-        print("👉 Run `make_installer.bat` to package into Video_AI_Setup.exe!")
+        print("[SUCCESS] Compilation Successful!")
+        print(f"[INFO] Standalone Windows App built at: {dist_dir}")
+        print("[INFO] All Python code is compiled into binaries (Zero .py source code exposed).")
+        print("[INFO] Run `make_installer.bat` to package into Video_AI_Setup.exe!")
         print("==============================================================\n")
     else:
-        print(f"\n❌ Compilation failed with exit code {res.returncode}")
+        print(f"\n[ERROR] Compilation failed with exit code {res.returncode}")
         sys.exit(res.returncode)
 
 if __name__ == "__main__":

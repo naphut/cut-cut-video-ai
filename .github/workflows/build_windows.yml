@@ -12,6 +12,9 @@ jobs:
   build-windows:
     name: Build Video_AI_Setup_v1.0.exe
     runs-on: windows-latest
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"
 
     steps:
       - name: 📥 Check out repository
