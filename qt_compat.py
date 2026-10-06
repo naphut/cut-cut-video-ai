@@ -7,7 +7,7 @@ import sys
 try:
     from PySide6 import QtCore, QtWidgets, QtGui
     from PySide6.QtCore import Qt, Signal, Slot, QThread, QUrl, QMimeData, QTimer, QFileSystemWatcher
-    from PySide6.QtGui import QAction, QKeySequence, QDesktopServices, QShortcut, QFontDatabase, QFont
+    from PySide6.QtGui import QAction, QKeySequence, QDesktopServices, QShortcut, QFontDatabase, QFont, QIcon, QCursor
     from PySide6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, 
         QPushButton, QFrame, QFileDialog, QTableWidget, QTableWidgetItem, 
@@ -28,7 +28,7 @@ try:
 except ImportError:
     from PyQt5 import QtCore, QtWidgets, QtGui
     from PyQt5.QtCore import Qt, pyqtSignal as Signal, pyqtSlot as Slot, QThread, QUrl, QMimeData, QTimer, QFileSystemWatcher
-    from PyQt5.QtGui import QKeySequence, QDesktopServices
+    from PyQt5.QtGui import QKeySequence, QDesktopServices, QFontDatabase, QFont, QIcon, QCursor
     from PyQt5.QtWidgets import (
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, 
         QPushButton, QFrame, QFileDialog, QTableWidget, QTableWidgetItem, 
