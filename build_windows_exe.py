@@ -122,6 +122,18 @@ def build():
     res = subprocess.run(cmd, cwd=BASE_DIR)
     if res.returncode == 0:
         dist_dir = os.path.join(BASE_DIR, "dist", "Video_AI")
+        internal_dir = os.path.join(dist_dir, "_internal")
+        for exe_name in ["ffmpeg.exe", "ffprobe.exe"]:
+            src = os.path.join(BASE_DIR, exe_name)
+            if os.path.exists(src):
+                try:
+                    shutil.copy2(src, os.path.join(dist_dir, exe_name))
+                    if os.path.exists(internal_dir):
+                        shutil.copy2(src, os.path.join(internal_dir, exe_name))
+                    print(f"[INFO] Copied {exe_name} to dist and _internal directories.")
+                except Exception as e:
+                    print(f"[!] Note: Could not copy {exe_name}: {e}")
+
         print("\n==============================================================")
         print("[SUCCESS] Compilation Successful!")
         print(f"[INFO] Standalone Windows App built at: {dist_dir}")

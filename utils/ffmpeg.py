@@ -7,19 +7,51 @@ from utils.logger import logger
 
 import sys
 
+def get_ffmpeg_executable() -> str:
+    """Find absolute or resolved path to ffmpeg executable across system PATH and bundled folders."""
+    # 1. System PATH
+    found = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
+    if found:
+        return found
+    # 2. Check frozen bundle and local directories
+    candidate_bases = [
+        getattr(sys, '_MEIPASS', None),
+        os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__)),
+        os.path.join(os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__)), "_internal"),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..")),
+    ]
+    for base in candidate_bases:
+        if base:
+            candidate = os.path.join(base, "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg")
+            if os.path.exists(candidate):
+                return candidate
+    return "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
+
+def get_ffprobe_executable() -> str:
+    """Find absolute or resolved path to ffprobe executable across system PATH and bundled folders."""
+    found = shutil.which("ffprobe") or shutil.which("ffprobe.exe")
+    if found:
+        return found
+    candidate_bases = [
+        getattr(sys, '_MEIPASS', None),
+        os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__)),
+        os.path.join(os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__)), "_internal"),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..")),
+    ]
+    for base in candidate_bases:
+        if base:
+            candidate = os.path.join(base, "ffprobe.exe" if sys.platform == "win32" else "ffprobe")
+            if os.path.exists(candidate):
+                return candidate
+    return "ffprobe.exe" if sys.platform == "win32" else "ffprobe"
+
 def is_ffmpeg_available() -> bool:
     """Check if ffmpeg command is available in system path or local directory."""
+    ffmpeg_bin = get_ffmpeg_executable()
     try:
-        res = subprocess.run(["ffmpeg", "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        res = subprocess.run([ffmpeg_bin, "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         return res.returncode == 0
     except Exception:
-        local_bin = "ffmpeg.exe" if sys.platform == "win32" else "./ffmpeg"
-        if os.path.exists(local_bin):
-            try:
-                res = subprocess.run([local_bin, "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                return res.returncode == 0
-            except Exception:
-                pass
         return False
 
 def get_safe_ffmpeg_threads() -> int:
@@ -36,13 +68,20 @@ def safe_run_ffmpeg(cmd: list, timeout: float = None) -> subprocess.CompletedPro
         except Exception:
             pass
 
-    if "-threads" not in cmd and len(cmd) > 1 and cmd[0] == "ffmpeg":
-        cmd = [cmd[0], "-threads", str(get_safe_ffmpeg_threads())] + cmd[1:]
+    cmd_copy = list(cmd)
+    if len(cmd_copy) > 0:
+        if cmd_copy[0] in ("ffmpeg", "ffmpeg.exe"):
+            cmd_copy[0] = get_ffmpeg_executable()
+        elif cmd_copy[0] in ("ffprobe", "ffprobe.exe"):
+            cmd_copy[0] = get_ffprobe_executable()
+
+    if "-threads" not in cmd_copy and len(cmd_copy) > 1 and ("ffmpeg" in cmd_copy[0] or "ffmpeg.exe" in cmd_copy[0]):
+        cmd_copy = [cmd_copy[0], "-threads", str(get_safe_ffmpeg_threads())] + cmd_copy[1:]
 
     preexec = _safe_preexec if sys.platform != "win32" else None
 
     return subprocess.run(
-        cmd,
+        cmd_copy,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -50,11 +89,10 @@ def safe_run_ffmpeg(cmd: list, timeout: float = None) -> subprocess.CompletedPro
         preexec_fn=preexec
     )
 
-
 def get_video_info(video_path: str) -> dict:
     """Get metadata about video file (duration, resolution, audio presence)."""
     cmd = [
-        "ffprobe",
+        get_ffprobe_executable(),
         "-v", "error",
         "-print_format", "json",
         "-show_format",

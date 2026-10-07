@@ -3,8 +3,26 @@ import os
 
 # Automatically add application root directory and bundled tools to system PATH
 app_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
-if app_dir not in os.environ.get("PATH", ""):
-    os.environ["PATH"] = app_dir + os.pathsep + os.environ.get("PATH", "")
+search_dirs = [app_dir]
+if getattr(sys, 'frozen', False):
+    search_dirs.append(os.path.join(app_dir, "_internal"))
+    if hasattr(sys, '_MEIPASS'):
+        search_dirs.append(sys._MEIPASS)
+
+for d in search_dirs:
+    if os.path.exists(d) and d not in os.environ.get("PATH", "").split(os.pathsep):
+        os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+
+# Configure pydub to immediately find bundled ffmpeg and ffprobe
+try:
+    from pydub import AudioSegment
+    for d in search_dirs:
+        ff = os.path.join(d, "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg")
+        if os.path.exists(ff):
+            AudioSegment.converter = ff
+            break
+except Exception:
+    pass
 
 # Prevent OpenBLAS / PyTorch multi-threaded stack allocation crash on macOS ARM64
 os.environ["OPENBLAS_NUM_THREADS"] = "1"

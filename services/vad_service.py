@@ -8,6 +8,7 @@ from typing import List, Dict, Any
 from pydub import AudioSegment
 from pydub.silence import detect_nonsilent
 from utils.logger import logger
+from utils.ffmpeg import get_ffmpeg_executable, get_ffprobe_executable
 
 class VADService:
     def __init__(
@@ -21,6 +22,12 @@ class VADService:
         self.silence_thresh_offset_db = silence_thresh_offset_db
         self.min_speech_len_ms = min_speech_len_ms
         self.speech_padding_ms = speech_padding_ms
+        try:
+            ff_bin = get_ffmpeg_executable()
+            if os.path.exists(ff_bin):
+                AudioSegment.converter = ff_bin
+        except Exception:
+            pass
 
     def detect_speech_regions(self, audio_path: str) -> List[Dict[str, float]]:
         """
@@ -32,6 +39,9 @@ class VADService:
             return []
 
         try:
+            ff_bin = get_ffmpeg_executable()
+            if os.path.exists(ff_bin):
+                AudioSegment.converter = ff_bin
             audio = AudioSegment.from_file(audio_path)
             total_duration_sec = len(audio) / 1000.0
 

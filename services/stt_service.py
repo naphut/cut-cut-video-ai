@@ -21,6 +21,7 @@ from services.vad_service import VADService
 from utils.logger import logger
 from utils.config_manager import get_gemini_api_key
 from utils.file_utils import get_temp_path
+from utils.ffmpeg import safe_run_ffmpeg, get_ffmpeg_executable, get_ffprobe_executable
 
 class STTService:
     def __init__(self, api_key: Optional[str] = None):
@@ -163,14 +164,16 @@ class STTService:
                     "-i", audio_path, "-vn", "-ar", "16000", "-ac", "1", "-b:a", "32k",
                     chunk_file
                 ]
-                subprocess.run(cmd, capture_output=True, check=False)
-                active_file = chunk_file if os.path.exists(chunk_file) else audio_path
+                safe_run_ffmpeg(cmd)
+                active_file = chunk_file if (os.path.exists(chunk_file) and os.path.getsize(chunk_file) > 0) else audio_path
                 pct = int(10 + (idx / float(total_chunks)) * 80)
                 msg = f"Gemini STT: Transcribing chunk {idx+1}/{total_chunks} ({int(start_sec//60)}m - {int((start_sec+dur_sec)//60)}m)..."
             else:
                 active_file = get_temp_path("stt_compressed.mp3")
                 cmd = ["ffmpeg", "-y", "-i", audio_path, "-vn", "-ar", "16000", "-ac", "1", "-b:a", "32k", active_file]
-                subprocess.run(cmd, capture_output=True, check=False)
+                safe_run_ffmpeg(cmd)
+                if not os.path.exists(active_file) or os.path.getsize(active_file) == 0:
+                    active_file = audio_path
                 pct = 35
                 msg = "Gemini STT: Transcribing speech with timestamps and speaker diarization..."
 
@@ -479,7 +482,8 @@ class STTService:
 
     def _get_duration_sec(self, audio_path: str) -> float:
         try:
-            cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", audio_path]
+            ffprobe_bin = get_ffprobe_executable()
+            cmd = [ffprobe_bin, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", audio_path]
             res = subprocess.run(cmd, capture_output=True, text=True, check=False)
             if res.returncode == 0 and res.stdout.strip():
                 return float(res.stdout.strip())
