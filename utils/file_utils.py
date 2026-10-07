@@ -1,3 +1,4 @@
+import sys
 import os
 import shutil
 import json
@@ -7,16 +8,53 @@ from pathlib import Path
 from utils.logger import logger
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-TEMP_DIR = BASE_DIR / "temp"
-OUTPUT_DIR = BASE_DIR / "output"
+
+def get_app_data_dir() -> Path:
+    """Return user-writable data directory (safe on Windows Program Files and macOS)."""
+    if getattr(sys, 'frozen', False):
+        if sys.platform == "win32":
+            appdata = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~\\AppData\\Local")
+            target = Path(appdata) / "Video AI Studio"
+        else:
+            target = Path.home() / "Library" / "Application Support" / "Video AI Studio"
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            return target
+        except Exception:
+            pass
+    return BASE_DIR
+
+DATA_DIR = get_app_data_dir()
+TEMP_DIR = DATA_DIR / "temp"
+
+def get_default_output_dir() -> Path:
+    """Return default output directory (Users/Videos on Windows or project output)."""
+    if getattr(sys, 'frozen', False):
+        if sys.platform == "win32":
+            videos_dir = Path.home() / "Videos" / "Video AI Studio"
+            try:
+                videos_dir.mkdir(parents=True, exist_ok=True)
+                return videos_dir
+            except Exception:
+                pass
+        return DATA_DIR / "output"
+    return BASE_DIR / "output"
+
+OUTPUT_DIR = get_default_output_dir()
 
 def ensure_directories():
-    """Ensure temp and output directories exist."""
-    TEMP_DIR.mkdir(parents=True, exist_ok=True)
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    (OUTPUT_DIR / "videos").mkdir(parents=True, exist_ok=True)
-    (OUTPUT_DIR / "audio").mkdir(parents=True, exist_ok=True)
-    (OUTPUT_DIR / "subtitles").mkdir(parents=True, exist_ok=True)
+    """Ensure temp and output directories exist safely without crashing on permission errors."""
+    try:
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.warning(f"Could not create TEMP_DIR ({TEMP_DIR}): {e}")
+    try:
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        (OUTPUT_DIR / "videos").mkdir(parents=True, exist_ok=True)
+        (OUTPUT_DIR / "audio").mkdir(parents=True, exist_ok=True)
+        (OUTPUT_DIR / "subtitles").mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.warning(f"Could not create OUTPUT_DIR ({OUTPUT_DIR}): {e}")
 
 def get_output_subfolders(base_dir: str = None) -> list:
     """Return a list of existing subfolders inside the output directory."""
